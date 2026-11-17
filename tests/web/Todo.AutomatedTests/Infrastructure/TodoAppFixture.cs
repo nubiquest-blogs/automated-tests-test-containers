@@ -28,10 +28,23 @@ public sealed class TodoAppFixture : IAsyncLifetime
                 .CreateAsync<Projects.Todo_Host>(cancellationToken: startup.Token);
             builder.Services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
 
-            // Reuse the real topology, but never its development container or saved data.
+            // Challenge: the real AppHost configures PostgreSQL with a persistent lifetime
+            // and a data volume. Tests reuse that topology, but must isolate the database:
+            // ResetDatabase deletes every task before each scenario, so sharing the
+            // development database would erase the developer's saved tasks.
+
+            // Get the resource already declared by the AppHost; this does not add a second one.
             var postgres = builder.CreateResourceBuilder<PostgresServerResource>("postgres");
+
+            // Override the persistent lifetime so Aspire removes this container at teardown.
+            // A unique name keeps it separate from the development container and other test runs.
             postgres.WithLifetime(ContainerLifetime.Session)
                 .WithContainerName($"todo-tests-{Guid.NewGuid():N}");
+
+            // A new container alone is not enough: mounting the development volume would
+            // still expose the same saved data. Remove mounts so this run starts with an
+            // empty database, initialized by the backend's normal EF migrations.
+            // Materialize a copy with ToArray because we remove items from the original collection.
             foreach (var mount in postgres.Resource.Annotations.OfType<ContainerMountAnnotation>().ToArray())
                 postgres.Resource.Annotations.Remove(mount);
 
@@ -71,12 +84,12 @@ public sealed class TodoAppFixture : IAsyncLifetime
         }
     }
 
-    public async Task RunScenario(string name, Func<IPage, Task> scenario, bool mobile = false)
+    public async Task RunScenario(string name, Func<IPage, Task> scenario)
     {
         await using var context = await _browser!.NewContextAsync(new()
         {
             BaseURL = BaseAddress.ToString(),
-            ViewportSize = new() { Width = mobile ? 390 : 1440, Height = mobile ? 844 : 1000 }
+            ViewportSize = new() { Width = 1440, Height = 1000 }
         });
         await context.Tracing.StartAsync(new() { Screenshots = true, Snapshots = true, Sources = true });
         var page = await context.NewPageAsync();

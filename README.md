@@ -1,21 +1,23 @@
-# Automated Browser Tests with Playwright and Testcontainers in .NET 10
+# Automated Testing Using Aspire and Playwright in .NET 10
 
 Manual testing is exhausting and very repetitive. After N attempts, tester can lose focus and make mistakes. On the other hand, manual tests and integration tests are extremely useful to validate the code. However, they do not provide the full confidence over the expectations. That is why, end-to-end automated testing can be extremely useful to assess the quality and to guarantee no regressions are happening after pushing new changes.
 
-In this walkthrough, we'll build automated tests that answer these questions using [Playwright for .NET](https://playwright.dev/dotnet/) and [Testcontainers](https://dotnet.testcontainers.org/). The browser will use a real Blazor Server application, which calls a minimal API, which writes to PostgreSQL. The test run starts everything it needs and cleans up afterwards.
+In this walkthrough, we'll build automated tests using [Aspire's testing support](https://aspire.dev/testing/manage-app-host/) and [Playwright for .NET](https://playwright.dev/dotnet/). The browser will use a real Blazor Server application, which calls a minimal API, which writes to PostgreSQL. The test run starts everything it needs and cleans up afterwards.
 
-The demo is **Daymark**, a small TODO app built with .NET 10, Entity Framework Core, PostgreSQL and Tailwind CSS. Aspire starts the application for local development. The automated tests have their own environment.
+The demo is **Daymark**, a small TODO app built with .NET 10, Entity Framework Core, PostgreSQL and Tailwind CSS. Aspire starts the application for local development and automated testing. Each test run gets its own isolated environment.
 
 ![Daymark TODO application with active and completed tasks](images/daymark.jpg)
 
 This tutorial covers:
 
-- Starting PostgreSQL from C# using Testcontainers.
-- Hosting both applications on real HTTP endpoints for the browser.
+- Using **`Aspire.Hosting.Testing`**, to start and control the complete application from our tests.
+- Letting Aspire manage PostgreSQL, application startup and endpoint discovery.
 - Writing Playwright tests around user actions and persisted results.
 - Keeping scenarios independent and saving useful diagnostics when they fail.
 
-## Running the demo
+[`Aspire.Hosting.Testing`](https://aspire.dev/testing/manage-app-host/) connects our test suite to the real AppHost. Its `DistributedApplicationTestingBuilder` lets us load the application definition, adjust resources for testing, and start the backend, frontend and PostgreSQL together. The package also provides helpers to wait for healthy resources, discover their URLs and create HTTP clients. Disposing the test application shuts down its session-scoped resources. This gives Playwright a running application to exercise, with xUnit managing the test lifecycle.
+
+## Running the TODO app
 
 You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), [Node.js](https://nodejs.org/) 20 or later, and a running Docker-compatible container runtime. Docker Desktop works on macOS and Windows; Linux containers must be available. The repository pins a .NET 10 SDK baseline and allows newer .NET 10 feature bands.
 
@@ -56,16 +58,16 @@ dotnet run --project src/aspire/Todo.Host
 
 Open **http://localhost:5200** for the frontend. Aspire prints the dashboard login link in the terminal. The backend is available at **http://localhost:5201**. This local demo uses HTTP and enables Aspire's unsecured transport setting in its development launch profile.
 
-The development database uses a Docker volume, so tasks survive application restarts. The database starts empty on the first run; the screenshots contain tasks added through the browser. 
+The development database uses a Docker volume, so tasks survive application restarts. The database starts empty on the first run; the screenshots contain tasks added through the browser.
 
-## A small application to test
+## The TODO app solution
 
 The solution has six projects:
 
 ```text
 src/
   aspire/
-    Todo.Host                 Local orchestration
+    Todo.Host                 Development and test orchestration
     Todo.ServiceDefaults      Discovery, health, resilience and telemetry
   backend/
     Todo.Backend              Minimal APIs, EF context and migrations
@@ -75,10 +77,10 @@ src/
     Todo.Web                  Blazor Server and Tailwind
 tests/
   web/
-    Todo.AutomatedTests      Playwright scenarios and test fixture
+    Todo.AutomatedTests       Playwright scenarios and Aspire test fixture
 ```
 
-The frontend is an HTTP client of the backend. Only the backend application opens database connections. 
+The frontend is an HTTP client of the backend. Only the backend application opens database connections.
 
 Our only application table is `Todos`, with `Id`, `Title`, `IsCompleted` and `CreatedAt`. EF also creates its migration history table. The API has four operations:
 
@@ -89,55 +91,8 @@ Our only application table is `Todos`, with `Id`, `Title`, `IsCompleted` and `Cr
 | PUT | `/api/todos/{id}` | Update title and completion status |
 | DELETE | `/api/todos/{id}` | Delete a task and return status 204 |
 
-Titles are trimmed and must contain between 1 and 200 characters. Invalid titles return a validation problem with status 400; updating or deleting an unknown ID returns 404.
 
-For example, the create endpoint is deliberately simple:
-
-```csharp
-group.MapPost("/", async (CreateTodoRequest request, TodoDbContext db,
-    CancellationToken cancellationToken) =>
-{
-    if (!TodoRules.IsValidTitle(request.Title)) return InvalidTitle();
-    var todo = new TodoEntity { Title = request.Title!.Trim() };
-    db.Todos.Add(todo);
-    await db.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/todos/{todo.Id}", Response(todo));
-});
-```
-
-The backend registers its database through a bootstrapper called from `Program.cs`:
-
-```csharp
-public static IHostApplicationBuilder AddTodoDatabase(this IHostApplicationBuilder builder)
-{
-    builder.AddNpgsqlDbContext<TodoDbContext>("todos");
-    builder.Services.AddHostedService<MigrationHostedService>();
-    return builder;
-}
-```
-
-`AddNpgsqlDbContext` reads the named connection from application configuration and registers the context, database health check and telemetry. Aspire supplies that connection in development; the test fixture supplies its container connection.
-
-`MigrationHostedService.StartAsync` applies migrations before the backend accepts requests:
-
-```csharp
-public async Task StartAsync(CancellationToken cancellationToken)
-{
-    await using var scope = scopes.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<TodoDbContext>()
-        .Database.MigrateAsync(cancellationToken);
-}
-```
-
-EF CLI commands use the same application registration, without a separate design-time context factory. When running outside Aspire, pass the connection through configuration. For example, this model check does not require a running database:
-
-```bash
-dotnet ef migrations has-pending-model-changes --project src/backend/Todo.Backend -- --ConnectionStrings:todos "Host=localhost;Database=todos;Username=postgres;Password=postgres"
-```
-
-Use the intended database's actual connection string for commands that connect, such as `dotnet ef database update`.
-
-## What Aspire does here
+## The role of Aspire
 
 The AppHost starts PostgreSQL and connects the applications:
 
@@ -160,77 +115,41 @@ Both applications reference `Todo.ServiceDefaults`. It adds service discovery, H
 
 The web client uses `http://backend` as its base address. Service discovery resolves that name to the endpoint supplied by Aspire. HTTP retries are disabled for unsafe methods so that a failed POST isn't automatically sent again and potentially creates a duplicate task.
 
-For tests, we will supply the backend discovery address ourselves. We don't need to start the dashboard or the development database.
+For tests, we reuse this same AppHost. Aspire still supplies the database connection and resolves the backend service address, so we exercise the application wiring as well as the user interface. The test fixture changes the database lifetime, mounts and resource ports to keep it isolated from development. We'll look at these overrides in the Challenges section.
 
-## Starting PostgreSQL with Testcontainers
+## Validating the application with Aspire testing
 
-The test project uses xUnit to discover and run the automated browser scenarios. It references `Microsoft.Playwright`, `Testcontainers.PostgreSql` and `Microsoft.AspNetCore.Mvc.Testing`.
+The test project uses xUnit to discover and run the scenarios, `Aspire.Hosting.Testing` to manage the application, and `Microsoft.Playwright` to drive Chromium. It references `Todo.Host` and `Todo.Contracts`.
 
-The database setup in `TodoAppFixture` is only a few lines:
+In `TodoAppFixture.InitializeAsync`, we create a testing builder for the actual AppHost:
 
 ```csharp
-private readonly PostgreSqlContainer postgres =
-    new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("todo_tests")
-        .WithUsername("todo")
-        .WithPassword("todo-test-password")
-        .Build();
+using var startup = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+var builder = _builder = await DistributedApplicationTestingBuilder
+    .CreateAsync<Projects.Todo_Host>(cancellationToken: startup.Token);
 ```
 
-Then, during fixture initialization:
+The generated `Projects.Todo_Host` type identifies the AppHost project. The fixture keeps the builder in a field because it needs to stay alive for the entire suite.
+
+Before building, we apply the isolation overrides described below. Then we start the application and wait for the frontend to become healthy:
 
 ```csharp
-await postgres.StartAsync();
-backend = new BackendFactory(postgres.GetConnectionString());
+_application = await builder.BuildAsync(startup.Token);
+await _application.StartAsync(startup.Token);
+await _application.ResourceNotifications.WaitForResourceHealthyAsync("web", startup.Token);
+BaseAddress = _application.GetEndpoint("web", "http");
+_backend = _application.CreateHttpClient("backend", "http");
 ```
 
-Testcontainers waits for PostgreSQL readiness and gives us its mapped connection string. We don't choose a fixed database port. There is no shared development database to reset before running the tests, and no manually started container to remember.
+The AppHost already defines the dependency order: PostgreSQL, the `todos` database, the backend and then the frontend. The backend applies EF migrations during startup. Waiting for the frontend's healthy state lets us open the browser after its dependencies are ready. The two-minute cancellation token bounds this startup sequence.
 
-Please note that the password above belongs to a disposable local test database. The fixture doesn't reuse Aspire's database or volume.
+`GetEndpoint` supplies the real frontend URL, and `CreateHttpClient` supplies a client for the backend. We don't hardcode the test application's URLs. See [accessing Aspire resources in tests](https://aspire.dev/testing/accessing-resources/) for these helpers.
 
-## Giving the browser real endpoints
-
-An in-memory test server is convenient for HTTP client tests, but a browser needs a listening HTTP server. We use [`WebApplicationFactory.UseKestrel`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.mvc.testing.webapplicationfactory-1.usekestrel?view=aspnetcore-10.0) with port zero, allowing the operating system to pick an available port:
+The browser setup is the usual Playwright code:
 
 ```csharp
-private static Uri StartOnKestrel<T>(WebApplicationFactory<T> factory)
-    where T : class
-{
-    factory.UseKestrel(0);
-    using var client = factory.CreateClient();
-    return client.BaseAddress!;
-}
-```
-
-Each application exposes a distinct public marker, `BackendProgram` or `WebProgram`, so the factory can identify the correct application assembly.
-
-The backend factory supplies the connection string before startup:
-
-```csharp
-private sealed class BackendFactory(string connectionString)
-    : WebApplicationFactory<BackendProgram>
-{
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
-    {
-        builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:todos", connectionString);
-        builder.UseSetting("Logging:LogLevel:Default", "Warning");
-    }
-}
-```
-
-The frontend factory supplies `services:backend:http:0` with the backend's actual URL. It also enables static web assets so that styles are served from the application when hosted by the tests.
-
-The startup order is:
-
-```csharp
-await postgres.StartAsync();
-backend = new BackendFactory(postgres.GetConnectionString());
-var backendAddress = StartOnKestrel(backend);
-web = new WebFactory(backendAddress);
-BaseAddress = StartOnKestrel(web);
-playwright = await Playwright.CreateAsync();
-browser = await playwright.Chromium.LaunchAsync(new()
+_playwright = await Playwright.CreateAsync();
+_browser = await _playwright.Chromium.LaunchAsync(new()
 {
     Headless = Environment.GetEnvironmentVariable("HEADED") != "1"
 });
@@ -242,26 +161,97 @@ The resulting path is the same one a person uses:
 Chromium → Blazor Server → HTTP API → EF Core → PostgreSQL
 ```
 
-Blazor's circuit, HTTP serialization, routing and database writes are all involved. Nothing in that path is replaced by a mock.
+Aspire starts the real backend and frontend processes. Blazor's circuit, HTTP serialization, routing and database writes are all involved. Nothing in that path is replaced by a mock.
 
 ## Keeping scenarios independent
 
-Starting a database and both hosts for every assertion would be expensive. We share the fixture across one test class, while each scenario starts with an empty `Todos` table and a fresh browser context.
+Starting the application for every assertion would be expensive. We share `TodoAppFixture` across the test class using xUnit's `IClassFixture<TodoAppFixture>`. Before each scenario, the test class calls `ResetDatabase`; each scenario also gets a fresh browser context.
 
-The reset uses a service scope from the test backend:
+The reset goes through the backend's normal API:
 
 ```csharp
 public async Task ResetDatabase()
 {
-    await using var scope = backend!.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<TodoDbContext>()
-        .Todos.ExecuteDeleteAsync();
+    var backend = _backend ?? throw new InvalidOperationException("The test application has not started.");
+    var todos = await backend.GetFromJsonAsync<List<TodoResponse>>("/api/todos") ?? [];
+    foreach (var todo in todos)
+    {
+        using var response = await backend.DeleteAsync($"/api/todos/{todo.Id}");
+        response.EnsureSuccessStatusCode();
+    }
 }
 ```
 
-This is test setup, not a public reset endpoint. It leaves the migrated schema intact. All scenarios belong to the same xUnit class, which executes them sequentially; parallel scenarios would need separate databases or another isolation strategy.
+This uses the existing list and delete endpoints, so the fixture doesn't need access to the backend's context or a special reset endpoint. It leaves the migrated schema intact. For this small TODO demo, deleting the few tasks created by the previous scenario is enough.
+
+All scenarios belong to the same xUnit class, which executes them sequentially. Parallel scenarios would need separate databases or another isolation strategy because one scenario's reset must not delete another scenario's data.
 
 A new browser context keeps cookies, storage and pages seperate between scenarios. The shared Chromium process avoids paying browser startup cost for every test.
+
+## Challenges
+
+### Keeping the development database out of the tests
+
+The AppHost configures PostgreSQL with a persistent container and a data volume. This is useful during development because tasks survive restarts. For tests, it creates a problem: our reset deletes every task before each scenario. Reusing that database could erase the developer's saved tasks.
+
+We override the existing resource before calling `BuildAsync`:
+
+```csharp
+// Get the resource already declared by the AppHost; don't add another database server.
+var postgres = builder.CreateResourceBuilder<PostgresServerResource>("postgres");
+
+// Dispose of the test container with the test application, and give each run its own name.
+postgres.WithLifetime(ContainerLifetime.Session)
+    .WithContainerName($"todo-tests-{Guid.NewGuid():N}");
+
+// A different container must not mount the saved development data.
+foreach (var mount in postgres.Resource.Annotations.OfType<ContainerMountAnnotation>().ToArray())
+    postgres.Resource.Annotations.Remove(mount);
+```
+
+There are three parts to this isolation:
+
+- `Session` replaces the persistent lifetime so Aspire removes the test container during teardown.
+- The unique container name separates it from the development container and other test runs.
+- Removing the mounts keeps the saved development volume out of the test container. A new container name alone would not protect data if it still mounted that same volume.
+
+`ToArray()` makes a copy of the mount annotations so we can remove them from the original collection while iterating.
+
+Each run therefore starts with an empty PostgreSQL database. Aspire creates `todos`, and the backend's normal EF migrations create the application table. We reuse the real application definition while keeping the test data disposable.
+
+### Resetting data between scenarios
+
+A fresh database per test run doesn't mean a fresh database per scenario. We share the running application across the class, so tasks created by one scenario would remain for the next one. Creating a new browser context only resets browser state; it doesn't clear PostgreSQL. This could break empty-state assertions or make task counts depend on execution order.
+
+With Aspire, the backend runs in its own process. The AppHost's service provider contains orchestration services, not the backend's `TodoDbContext`. Our previous approach of resolving the context from an in-process application host therefore no longer fits.
+
+We solved this through the existing API. The fixture gets a backend client with `_application.CreateHttpClient("backend", "http")`. The `ResetDatabase` method shown above lists the tasks and deletes each one, checking that every deletion succeeds. No additional reset endpoint or direct database connection is needed.
+
+The test class calls this reset before every scenario through xUnit's asynchronous initialization:
+
+```csharp
+public Task InitializeAsync() => app.ResetDatabase();
+```
+
+Resetting before the next scenario also handles tasks left behind by a failed test. The database schema and running processes remain available, while each scenario starts with an empty task list. Scenarios in this class run sequentially so their resets cannot interfere with each other.
+
+### Avoiding fixed-port conflicts
+
+Development uses stable frontend and backend ports. Tests should work even when those ports are already in use by the development app. The fixture clears the host port on each endpoint before startup:
+
+```csharp
+foreach (var resource in builder.Resources)
+foreach (var endpoint in resource.Annotations.OfType<EndpointAnnotation>())
+    endpoint.Port = null;
+```
+
+Aspire allocates the test ports, and `GetEndpoint` returns the resulting URL. The frontend continues to discover the backend through Aspire's resource references.
+
+### Keeping the testing builder alive
+
+It is tempting to declare the testing builder with `await using` inside `InitializeAsync`. That method returns before the scenarios execute, so its local using scope would dispose the builder too early. In our first run, this caused an `ObjectDisposedException` from the HTTP client's meter factory.
+
+The fixture keeps both the testing builder and the distributed application in fields. Teardown disposes the browser and HTTP client, then the application, then the builder. The same cleanup runs if initialization fails. This keeps Aspire's shared services available until the scenarios finish.
 
 ## Writing the first browser test
 
@@ -314,7 +304,7 @@ The filter scenario creates two tasks, completes one, and checks the All, Active
 
 We also cover empty, whitespace-only and overlong titles. These browser scenarios check that the user sees a validation message and no task is created. They exercise the frontend validation; they don't claim to test every backend validation response independently. The backend applies the shared rule as well.
 
-The complete suite contains ten scenarios, including the three invalid-title cases:
+The complete suite contains nine scenarios, including the three invalid-title cases:
 
 | Scenario | What we check |
 | --- | --- |
@@ -325,11 +315,10 @@ The complete suite contains ten scenarios, including the three invalid-title cas
 | Delete | Removed task stays removed after reload |
 | Invalid titles, three cases | Validation message and no persisted task |
 | Invalid edit | Cancelling preserves the saved title |
-| Mobile | Create and complete at 390 × 844, without horizontal overflow |
 
 ## Waiting for behavior
 
-Browser tests become frustrating when they assume the application always responds within a fixed delay. Playwright's locators and assertions wait for the expected state, so we can write:
+Browser tests become frustrating when they assume the application always responds within a fixed delay. Playwright's locators and [retrying assertions](https://playwright.dev/dotnet/docs/test-assertions) wait for the expected state, so we can write:
 
 ```csharp
 await Expect(Row(page, "Publish the article")).ToBeVisibleAsync();
@@ -347,7 +336,7 @@ With Docker running and Chromium installed:
 dotnet test Todo.slnx
 ```
 
-You don't have to start Aspire first. The test command creates its own PostgreSQL container and application hosts. It also works while the development app is running because test listeners and the test database use dynamic ports.
+You don't have to run the AppHost manually first. The test fixture starts it through Aspire's testing builder, with its own PostgreSQL container and application processes. The dashboard is disabled by default for these test runs. The isolated container and dynamic ports also let the tests run alongside the development app.
 
 To watch the browser on macOS or Linux:
 
@@ -369,13 +358,13 @@ When a scenario fails, `RunScenario` attempts to save `failure.png` and `trace.z
 ./scripts/playwright.sh show-trace /path/to/TestResults/scenario/trace.zip
 ```
 
-The trace includes browser actions, DOM snapshots and screenshots. It is a lot more useful than only knowing that a button click timed out. The fixture disposes contexts, browser, hosts and database when the run finishes, and also cleans up if initialization fails.
+The trace includes browser actions, DOM snapshots and screenshots. It is a lot more useful than only knowing that a button click timed out. The fixture disposes browser contexts after each scenario. At the end of the suite it disposes the browser, HTTP client, distributed application and testing builder. Aspire removes the session-scoped database container; the development volume stays intact.
 
 If Chromium cannot be found, rerun the browser installation command after building. If the container cannot start, check that Docker is running and that the current user can access its socket. The first run may take longer while images and browsers are downloaded.
 
-## Wrap-uo
+## Wrap-up
 
-In this article, I have shown how we use Playwright for automated testing of a .net app composed of backend, a frontend and aspire as a dev orchestration tool.
+In this article, I have shown how we use Aspire and Playwright for automated testing of a .net app composed of a backend and a frontend. Aspire starts the full application and its database, while Playwright checks the user journeys through a real browser.
 
 These tests bring a lot of confidence. They are most of the time much more complex than the case we are showing in this walkthrough.
 

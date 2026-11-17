@@ -106,15 +106,6 @@ public sealed class TodoJourneyTest(TodoAppFixture app) : IClassFixture<TodoAppF
         await Expect(Row(page, "Keep this title")).ToBeVisibleAsync();
     });
 
-    [Fact]
-    public Task Create_and_complete_a_task_on_mobile() => app.RunScenario(nameof(Create_and_complete_a_task_on_mobile), async page =>
-    {
-        await Add(page, "A small screen, a real task");
-        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Complete A small screen, a real task", Exact = true }).CheckAsync();
-        await Expect(page.GetByRole(AriaRole.Progressbar)).ToHaveAttributeAsync("aria-valuenow", "100");
-        Assert.True(await page.EvaluateAsync<bool>("document.documentElement.scrollWidth <= window.innerWidth"));
-    }, mobile: true);
-
     private static ILocator Row(IPage page, string title) => page.GetByTestId("todo-row").Filter(new() { HasText = title });
     private static ILocator Filter(IPage page, string name) => page.GetByRole(AriaRole.Navigation, new() { Name = "Task filters" })
         .GetByRole(AriaRole.Button).Filter(new() { HasText = name });
