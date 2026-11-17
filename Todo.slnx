@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/aspire/">
+    <Project Path="src/aspire/Todo.Host/Todo.Host.csproj" />
+    <Project Path="src/aspire/Todo.ServiceDefaults/Todo.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/src/backend/"><Project Path="src/backend/Todo.Backend/Todo.Backend.csproj" /></Folder>
+  <Folder Name="/src/common/"><Project Path="src/common/Todo.Contracts/Todo.Contracts.csproj" /></Folder>
+  <Folder Name="/src/web/"><Project Path="src/web/Todo.Web/Todo.Web.csproj" /></Folder>
+  <Folder Name="/tests/web/"><Project Path="tests/web/Todo.AutomatedTests/Todo.AutomatedTests.csproj" /></Folder>
+</Solution>

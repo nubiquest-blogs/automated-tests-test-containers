@@ -1,0 +1,104 @@
+@import "tailwindcss";
+@source "../Components";
+@theme { --font-sans: "Avenir Next", "Segoe UI", sans-serif; }
+@layer base {
+    body { @apply m-0 bg-[#f7f8f3] text-[#282c29] antialiased; }
+    button, a, input { -webkit-tap-highlight-color: transparent; }
+    button { @apply cursor-pointer transition-colors disabled:cursor-wait disabled:opacity-50; }
+    button:focus-visible, a:focus-visible, input:focus-visible { @apply outline-2 outline-offset-4 outline-[#507043]; }
+}
+@layer components {
+    .app-shell { @apply min-h-screen md:flex; }
+    .sidebar { @apply flex flex-col border-b border-[#e3e6dc] bg-[#eef0e8] px-6 py-6 md:fixed md:inset-y-0 md:w-[248px] md:border-r md:border-b-0 md:px-7 md:py-9; }
+    .brand { @apply flex items-center text-[27px] font-bold tracking-tight; }
+    .brand-mark { @apply mr-2.5 flex h-9 w-9 items-center justify-center rounded-xl bg-[#de7957] text-[25px] text-white; }
+    .brand-dot { @apply text-[#de7957]; }
+    .workspace-label { @apply mt-14 mb-5 hidden text-[10px] font-bold tracking-[0.16em] text-[#71786b] md:block; }
+    .sidebar nav { @apply mt-5 flex gap-2 md:mt-0 md:block; }
+    .nav-item { @apply flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-[13px] font-medium text-[#6b7366] hover:bg-[#e1e5d8]; }
+    .nav-item.selected { @apply bg-[#dfe6d4] text-[#33482d]; }
+    .nav-symbol { @apply text-xl; }
+    .nav-count { @apply ml-auto rounded-md bg-white/65 px-2 py-0.5 text-xs; }
+    .sidebar-note { @apply mt-auto hidden py-10 md:block; }
+    .note-star { @apply text-[46px] leading-none text-[#899b6d]; }
+    .sidebar-note p { @apply mt-4 text-xl font-semibold leading-snug tracking-tight; }
+    .sidebar-note>span:last-child { @apply mt-3 block text-[11px] text-[#78806f]; }
+    .profile { @apply hidden items-center gap-3 border-t border-[#d8ddce] pt-6 md:flex; }
+    .avatar { @apply flex h-9 w-9 items-center justify-center rounded-full bg-[#dce3cf] text-sm font-semibold; }
+    .profile strong { @apply block text-[11px] font-semibold; }
+    .profile div>span { @apply mt-1 block text-[10px] text-[#78806f]; }
+    .main-column { @apply min-w-0 flex-1 md:ml-[248px]; }
+    .topbar { @apply flex h-[79px] items-center justify-between border-b border-[#e5e7de] px-6 text-[11px] text-[#7c8176] lg:px-12; }
+    .topbar strong { @apply font-medium text-[#33392f]; }
+    .topbar-tag { @apply hidden items-center gap-2 text-[10px] sm:flex; }
+    .topbar-tag>span { @apply h-1.5 w-1.5 rounded-full bg-[#7f9963]; }
+    .main-content { @apply mx-auto max-w-[1330px] px-5 pt-10 pb-8 sm:px-8 lg:px-12 lg:pt-14; }
+    .eyebrow { @apply flex items-center gap-2.5 text-[9px] font-bold tracking-[0.18em] text-[#7b856f]; }
+    .eyebrow>span { @apply h-1.5 w-1.5 rounded-full bg-[#b2c68d]; }
+    .page-heading { @apply mt-4 mb-10 flex items-center justify-between; }
+    .page-heading h1 { @apply text-[32px] font-semibold leading-tight tracking-[-0.055em] sm:text-[42px] lg:text-[46px]; }
+    .page-heading h1 span { @apply text-[#de7957]; }
+    .page-heading p { @apply mt-3 text-[12px] leading-relaxed text-[#7d8277] sm:text-[13px]; }
+    .heading-doodle { @apply mr-5 hidden text-6xl font-light text-[#c6ceba] xl:block; }
+    .content-grid { @apply grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_246px]; }
+    .task-panel { @apply min-w-0 overflow-hidden rounded-2xl border border-[#e0e4d8] bg-white shadow-[0_4px_24px_0_rgb(36_47_25_/_0.025)]; }
+    .panel-header { @apply flex items-center justify-between px-6 pt-6 pb-5; }
+    .panel-header h2 { @apply text-[16px] font-semibold tracking-tight; }
+    .panel-header div>span { @apply mt-1 block text-[10px] text-[#8b9085]; }
+    .panel-icon { @apply text-lg text-[#a8afa0]; }
+    .add-form { @apply mx-5 mb-5 flex items-center gap-2 rounded-xl border border-[#e3e7db] bg-[#f8faf4] p-2 pl-3; }
+    .add-plus { @apply text-xl font-light text-[#98a28c]; }
+    .add-form input { @apply min-w-0 flex-1 bg-transparent py-2 text-[11px] placeholder:text-[#929a88] focus:outline-none; }
+    .add-button { @apply flex shrink-0 items-center gap-3 rounded-lg bg-[#d8edac] px-3 py-2.5 text-[10px] font-semibold text-[#374a26] hover:bg-[#c8e394]; }
+    .add-button span { @apply text-base leading-none; }
+    .task-list { @apply px-5 pb-2; }
+    .task-row { @apply flex min-h-[73px] items-center gap-3 border-t border-[#eff0ea] px-1 py-4; }
+    .task-checkbox { @apply h-[18px] w-[18px] shrink-0 cursor-pointer rounded-md accent-[#718a54]; }
+    .task-title { @apply min-w-0 flex-1 break-words text-[12px] font-medium; }
+    .completed .task-title { @apply text-[#9a9f92] line-through; }
+    .done-badge { @apply hidden rounded-md bg-[#eff5e6] px-2 py-1 text-[9px] text-[#788c61] sm:block; }
+    .row-actions { @apply ml-auto flex shrink-0 items-center gap-1; }
+    .icon-button { @apply rounded-md p-1.5 text-[#a3aa9a] hover:bg-[#f1f4eb] hover:text-[#465b36]; }
+    .icon-button svg { @apply h-[15px] w-[15px] fill-none stroke-current stroke-[1.5]; }
+    .delete-button { @apply hover:bg-[#fcf0eb] hover:text-[#bc694c]; }
+    .panel-footer { @apply flex flex-wrap items-center justify-between gap-2 border-t border-[#e9ece3] bg-[#fcfdf9] px-6 py-4 text-[9px] text-[#8d9582]; }
+    .panel-footer>span:first-child { @apply flex items-center gap-2; }
+    .footer-dot { @apply h-1 w-1 rounded-full bg-[#9db57d]; }
+    .empty-state { @apply flex min-h-[290px] flex-col items-center justify-center px-5 py-12 text-center; }
+    .empty-icon { @apply mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#eef3e6] text-2xl text-[#809665]; }
+    .empty-state h3 { @apply text-base font-semibold tracking-tight; }
+    .empty-state p { @apply mt-2 text-xs text-[#8b9381]; }
+    .error-message { @apply mx-5 mb-4 rounded-lg bg-[#fff1eb] p-3 text-xs text-[#9a432d]; }
+    .edit-form { @apply flex min-w-0 flex-1 flex-wrap items-center gap-2; }
+    .edit-input { @apply min-w-0 flex-1 rounded-md border border-[#a5b98a] px-2 py-2 text-xs; }
+    .small-button { @apply rounded-md bg-[#d8edac] px-2 py-2 text-xs; }
+    .text-button { @apply px-1 text-xs text-[#778169]; }
+    .overview { @apply grid gap-5 sm:grid-cols-2 xl:grid-cols-1; }
+    .progress-card { @apply rounded-2xl bg-[#303e2c] px-6 py-6 text-[#eef1e8]; }
+    .card-eyebrow { @apply flex items-center justify-between text-[8px] font-semibold tracking-[0.13em]; }
+    .progress-card .card-eyebrow { @apply text-[#acbba0]; }
+    .card-eyebrow>span { @apply text-lg font-normal; }
+    .progress-card h2 { @apply mt-5 text-[23px] font-medium leading-[1.25] tracking-tight; }
+    .progress-value { @apply mt-7 flex items-baseline text-[46px] font-medium leading-none tracking-tight; }
+    .progress-value>span:first-child { @apply ml-1 text-[24px] text-[#c4d4ae]; }
+    .progress-caption { @apply ml-auto text-[9px] tracking-normal text-[#abb99d]; }
+    .progress-track { @apply mt-5 h-1.5 overflow-hidden rounded-full bg-[#536148]; }
+    .progress-track>span { @apply block h-full rounded-full bg-[#d6e9ad] transition-all; }
+    .progress-detail { @apply mt-3 text-[10px] text-[#a8b89a]; }
+    .focus-card { @apply rounded-2xl border border-[#e6e3d6] bg-[#f2efe5] px-6 py-6; }
+    .focus-symbol { @apply mb-6 block text-4xl leading-none text-[#bc9c64]; }
+    .focus-card .card-eyebrow { @apply text-[#99886c]; }
+    .focus-card p { @apply mt-4 text-[14px] font-medium leading-relaxed tracking-tight text-[#71664e]; }
+    .focus-rule { @apply mt-5 mb-4 h-px w-8 bg-[#d9cfb9]; }
+    .focus-card>span:last-child { @apply text-[9px] text-[#a49880]; }
+    .page-footer { @apply mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-[#e4e7dc] pt-5 text-[8px] tracking-[0.1em] text-[#9da491]; }
+    .page-footer>span:last-child { @apply flex items-center gap-3 tracking-normal; }
+    #blazor-error-ui { @apply fixed inset-x-0 bottom-0 z-50 hidden bg-[#fff1eb] p-4 text-center text-sm text-[#9a432d]; }
+}
+@media (max-width: 767px) {
+    .sidebar { padding-top: 18px; padding-bottom: 14px; }
+    .sidebar nav { margin-top: 18px; }
+    .nav-item { gap: 6px; padding: 9px 8px; font-size: 11px; }
+    .nav-symbol { font-size: 16px; }
+    .nav-count { padding-left: 5px; padding-right: 5px; }
+}

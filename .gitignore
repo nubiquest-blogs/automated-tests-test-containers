@@ -399,3 +399,10 @@ src/web/Nexa.Web/wwwroot/css/app.generated.css
 
 # Agent manual test temp files
 .agents/skills/manual-test/temp/
+
+# Browser diagnostics
+TestResults/
+**/TestResults/
+
+# Shared local Aspire launch profiles (no secrets)
+!src/**/Properties/launchSettings.json
