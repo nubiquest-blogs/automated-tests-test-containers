@@ -105,22 +105,47 @@ group.MapPost("/", async (CreateTodoRequest request, TodoDbContext db,
 });
 ```
 
-The backend applies migrations before accepting requests:
+The backend registers its database through a bootstrapper called from `Program.cs`:
 
 ```csharp
-await using (var scope = app.Services.CreateAsyncScope())
+public static IHostApplicationBuilder AddTodoDatabase(this IHostApplicationBuilder builder)
 {
-    await scope.ServiceProvider.GetRequiredService<TodoDbContext>()
-        .Database.MigrateAsync();
+    builder.AddNpgsqlDbContext<TodoDbContext>("todos");
+    builder.Services.AddHostedService<MigrationHostedService>();
+    return builder;
 }
 ```
+
+`AddNpgsqlDbContext` reads the named connection from application configuration and registers the context, database health check and telemetry. Aspire supplies that connection in development; the test fixture supplies its container connection.
+
+`MigrationHostedService.StartAsync` applies migrations before the backend accepts requests:
+
+```csharp
+public async Task StartAsync(CancellationToken cancellationToken)
+{
+    await using var scope = scopes.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<TodoDbContext>()
+        .Database.MigrateAsync(cancellationToken);
+}
+```
+
+EF CLI commands use the same application registration, without a separate design-time context factory. When running outside Aspire, pass the connection through configuration. For example, this model check does not require a running database:
+
+```bash
+dotnet ef migrations has-pending-model-changes --project src/backend/Todo.Backend -- --ConnectionStrings:todos "Host=localhost;Database=todos;Username=postgres;Password=postgres"
+```
+
+Use the intended database's actual connection string for commands that connect, such as `dotnet ef database update`.
 
 ## What Aspire does here
 
 The AppHost starts PostgreSQL and connects the applications:
 
 ```csharp
-var database = builder.AddPostgres("postgres").WithImageTag("17-alpine")
+var password = builder.AddParameter("postgres-password", "Password123", secret: true);
+var database = builder.AddPostgres("postgres", password: password)
+    .WithImageTag("17-alpine")
+    .WithLifetime(ContainerLifetime.Persistent)
     .WithDataVolume().AddDatabase("todos");
 var backend = builder.AddProject<Projects.Todo_Backend>("backend")
     .WithReference(database).WaitFor(database).WithHttpHealthCheck("/health");
@@ -128,6 +153,8 @@ builder.AddProject<Projects.Todo_Web>("web")
     .WithReference(backend).WaitFor(backend).WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
 ```
+
+The local database uses `Password123` and a persistent container with a data volume, so its credentials and tasks remain consistent across development restarts.
 
 Both applications reference `Todo.ServiceDefaults`. It adds service discovery, HTTP resilience, health checks and OpenTelemetry. When Aspire supplies an OTLP endpoint, telemetry is exported to the dashboard. The backend readiness check also checks database connectivity.
 

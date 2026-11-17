@@ -1,6 +1,9 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-var database = builder.AddPostgres("postgres").WithImageTag("17-alpine")
+var password = builder.AddParameter("postgres-password", "Password123", secret: true);
+var database = builder.AddPostgres("postgres", password: password)
+    .WithImageTag("17-alpine")
+    .WithLifetime(ContainerLifetime.Persistent)
     .WithDataVolume().AddDatabase("todos");
 var backend = builder.AddProject<Projects.Todo_Backend>("backend")
     .WithReference(database).WaitFor(database).WithHttpHealthCheck("/health");

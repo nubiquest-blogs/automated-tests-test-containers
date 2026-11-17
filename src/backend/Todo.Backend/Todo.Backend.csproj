@@ -2,6 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="../../common/Todo.Contracts/Todo.Contracts.csproj" />
     <ProjectReference Include="../../aspire/Todo.ServiceDefaults/Todo.ServiceDefaults.csproj" />
+    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.6.5" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.15" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.15" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.15" PrivateAssets="all" />
