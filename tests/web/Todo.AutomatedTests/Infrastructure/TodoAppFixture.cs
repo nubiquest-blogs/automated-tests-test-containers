@@ -1,37 +1,51 @@
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.PostgreSql;
-using Todo.Backend.Data;
+using Microsoft.Extensions.Logging;
+using Todo.Contracts.Todos;
 
 namespace Todo.AutomatedTests.Infrastructure;
 
 // ReSharper disable once ClassNeverInstantiated.Global
 public sealed class TodoAppFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithDatabase("todo_tests")
-        .WithUsername("todo")
-        .WithPassword("todo-test-password")
-        .Build();
-    private WebApplicationFactory<BackendProgram>? _backend;
+    private DistributedApplication? _application;
+    private IDistributedApplicationTestingBuilder? _builder;
+    private HttpClient? _backend;
     private IBrowser? _browser;
     private IPlaywright? _playwright;
-    private WebApplicationFactory<WebProgram>? _web;
-    
-    
+
     private Uri BaseAddress { get; set; } = null!;
 
     public async Task InitializeAsync()
     {
+        using var startup = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         try
         {
-            await _postgres.StartAsync();
-            _backend = new BackendFactory(_postgres.GetConnectionString());
-            var backendAddress = StartOnKestrel(_backend);
-            _web = new WebFactory(backendAddress);
-            BaseAddress = StartOnKestrel(_web);
+            var builder = _builder = await DistributedApplicationTestingBuilder
+                .CreateAsync<Projects.Todo_Host>(cancellationToken: startup.Token);
+            builder.Services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
+
+            // Reuse the real topology, but never its development container or saved data.
+            var postgres = builder.CreateResourceBuilder<PostgresServerResource>("postgres");
+            postgres.WithLifetime(ContainerLifetime.Session)
+                .WithContainerName($"todo-tests-{Guid.NewGuid():N}");
+            foreach (var mount in postgres.Resource.Annotations.OfType<ContainerMountAnnotation>().ToArray())
+                postgres.Resource.Annotations.Remove(mount);
+
+            // Leave fixed development ports available, including when the app is already running.
+            foreach (var resource in builder.Resources)
+            foreach (var endpoint in resource.Annotations.OfType<EndpointAnnotation>())
+                endpoint.Port = null;
+
+            _application = await builder.BuildAsync(startup.Token);
+            await _application.StartAsync(startup.Token);
+            await _application.ResourceNotifications.WaitForResourceHealthyAsync("web", startup.Token);
+            BaseAddress = _application.GetEndpoint("web", "http");
+            _backend = _application.CreateHttpClient("backend", "http");
+
             _playwright = await Playwright.CreateAsync();
             _browser = await _playwright.Chromium.LaunchAsync(new()
             {
@@ -45,11 +59,16 @@ public sealed class TodoAppFixture : IAsyncLifetime
         }
     }
 
-    // Called before each scenario, never against the Aspire development database.
+    // Reset through the real API; the fixture doesn't depend on backend internals or EF.
     public async Task ResetDatabase()
     {
-        await using var scope = _backend!.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<TodoDbContext>().Todos.ExecuteDeleteAsync();
+        var backend = _backend ?? throw new InvalidOperationException("The test application has not started.");
+        var todos = await backend.GetFromJsonAsync<List<TodoResponse>>("/api/todos") ?? [];
+        foreach (var todo in todos)
+        {
+            using var response = await backend.DeleteAsync($"/api/todos/{todo.Id}");
+            response.EnsureSuccessStatusCode();
+        }
     }
 
     public async Task RunScenario(string name, Func<IPage, Task> scenario, bool mobile = false)
@@ -99,46 +118,24 @@ public sealed class TodoAppFixture : IAsyncLifetime
         {
             _playwright?.Dispose();
             _playwright = null;
+            _backend?.Dispose();
+            _backend = null;
             try
             {
-                if (_web is not null) { await _web.DisposeAsync(); _web = null; }
+                if (_application is not null)
+                {
+                    await _application.DisposeAsync();
+                    _application = null;
+                }
             }
             finally
             {
-                try
+                if (_builder is not null)
                 {
-                    if (_backend is not null) { await _backend.DisposeAsync(); _backend = null; }
+                    await _builder.DisposeAsync();
+                    _builder = null;
                 }
-                finally { await _postgres.DisposeAsync(); }
             }
-        }
-    }
-
-    private static Uri StartOnKestrel<T>(WebApplicationFactory<T> factory) where T : class
-    {
-        factory.UseKestrel(0);
-        using var client = factory.CreateClient();
-        return client.BaseAddress!;
-    }
-
-    private sealed class BackendFactory(string connectionString) : WebApplicationFactory<BackendProgram>
-    {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.UseEnvironment("Development");
-            builder.UseSetting("ConnectionStrings:todos", connectionString);
-            builder.UseSetting("Logging:LogLevel:Default", "Warning");
-        }
-    }
-
-    private sealed class WebFactory(Uri backendAddress) : WebApplicationFactory<WebProgram>
-    {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.UseEnvironment("Development");
-            builder.UseSetting("services:backend:http:0", backendAddress.ToString());
-            builder.UseSetting("Logging:LogLevel:Default", "Warning");
-            builder.UseStaticWebAssets();
         }
     }
 }

@@ -13,5 +13,3 @@ app.MapStaticAssets();
 app.MapDefaultEndpoints();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Run();
-
-public partial class WebProgram;
