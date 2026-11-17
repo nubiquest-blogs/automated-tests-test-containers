@@ -98,10 +98,16 @@ The AppHost starts PostgreSQL and connects the applications:
 
 ```csharp
 var password = builder.AddParameter("postgres-password", "Password123", secret: true);
-var database = builder.AddPostgres("postgres", password: password)
-    .WithImageTag("17-alpine")
-    .WithLifetime(ContainerLifetime.Persistent)
-    .WithDataVolume().AddDatabase("todos");
+var postgres = builder.AddPostgres("postgres", password: password)
+    .WithImageTag("17-alpine");
+
+if (builder.Configuration.GetValue("UsePersistence", true))
+{
+    postgres.WithLifetime(ContainerLifetime.Persistent)
+        .WithDataVolume();
+}
+
+var database = postgres.AddDatabase("todos");
 var backend = builder.AddProject<Projects.Todo_Backend>("backend")
     .WithReference(database).WaitFor(database).WithHttpHealthCheck("/health");
 builder.AddProject<Projects.Todo_Web>("web")
@@ -109,13 +115,13 @@ builder.AddProject<Projects.Todo_Web>("web")
     .WithExternalHttpEndpoints();
 ```
 
-The local database uses `Password123` and a persistent container with a data volume, so its credentials and tasks remain consistent across development restarts.
+The local database uses `Password123`. Our `UsePersistence` setting defaults to `true`, enabling a persistent container and data volume so tasks survive development restarts.
 
 Both applications reference `Todo.ServiceDefaults`. It adds service discovery, HTTP resilience, health checks and OpenTelemetry. When Aspire supplies an OTLP endpoint, telemetry is exported to the dashboard. The backend readiness check also checks database connectivity.
 
 The web client uses `http://backend` as its base address. Service discovery resolves that name to the endpoint supplied by Aspire. HTTP retries are disabled for unsafe methods so that a failed POST isn't automatically sent again and potentially creates a duplicate task.
 
-For tests, we reuse this same AppHost. Aspire still supplies the database connection and resolves the backend service address, so we exercise the application wiring as well as the user interface. The test fixture changes the database lifetime, mounts and resource ports to keep it isolated from development. We'll look at these overrides in the Challenges section.
+For tests, we reuse this same AppHost. Aspire still supplies the database connection and resolves the backend service address, so we exercise the application wiring as well as the user interface. The test fixture passes `UsePersistence=false` to keep its database isolated from development. Aspire testing handles port allocation. We'll look at this configuration in the Challenges section.
 
 ## Validating the application with Aspire testing
 
@@ -126,12 +132,12 @@ In `TodoAppFixture.InitializeAsync`, we create a testing builder for the actual 
 ```csharp
 using var startup = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 var builder = _builder = await DistributedApplicationTestingBuilder
-    .CreateAsync<Projects.Todo_Host>(cancellationToken: startup.Token);
+    .CreateAsync<Projects.Todo_Host>(["UsePersistence=false"], cancellationToken: startup.Token);
 ```
 
 The generated `Projects.Todo_Host` type identifies the AppHost project. The fixture keeps the builder in a field because it needs to stay alive for the entire suite.
 
-Before building, we apply the isolation overrides described below. Then we start the application and wait for the frontend to become healthy:
+With development persistence disabled through configuration, we start the application and wait for the frontend to become healthy:
 
 ```csharp
 _application = await builder.BuildAsync(startup.Token);
@@ -194,30 +200,26 @@ A new browser context keeps cookies, storage and pages seperate between scenario
 
 The AppHost configures PostgreSQL with a persistent container and a data volume. This is useful during development because tasks survive restarts. For tests, it creates a problem: our reset deletes every task before each scenario. Reusing that database could erase the developer's saved tasks.
 
-We override the existing resource before calling `BuildAsync`:
+We make persistence an explicit AppHost configuration setting:
 
 ```csharp
-// Get the resource already declared by the AppHost; don't add another database server.
-var postgres = builder.CreateResourceBuilder<PostgresServerResource>("postgres");
-
-// Dispose of the test container with the test application, and give each run its own name.
-postgres.WithLifetime(ContainerLifetime.Session)
-    .WithContainerName($"todo-tests-{Guid.NewGuid():N}");
-
-// A different container must not mount the saved development data.
-foreach (var mount in postgres.Resource.Annotations.OfType<ContainerMountAnnotation>().ToArray())
-    postgres.Resource.Annotations.Remove(mount);
+if (builder.Configuration.GetValue("UsePersistence", true))
+{
+    postgres.WithLifetime(ContainerLifetime.Persistent)
+        .WithDataVolume();
+}
 ```
 
-There are three parts to this isolation:
+`UsePersistence` is our own setting, enabled by default for development. The test fixture disables it when creating the testing builder:
 
-- `Session` replaces the persistent lifetime so Aspire removes the test container during teardown.
-- The unique container name separates it from the development container and other test runs.
-- Removing the mounts keeps the saved development volume out of the test container. A new container name alone would not protect data if it still mounted that same volume.
+```csharp
+var builder = _builder = await DistributedApplicationTestingBuilder
+    .CreateAsync<Projects.Todo_Host>(["UsePersistence=false"], cancellationToken: startup.Token);
+```
 
-`ToArray()` makes a copy of the mount annotations so we can remove them from the original collection while iterating.
+The test AppHost therefore never attaches the saved development volume or enables persistent container lifetime. PostgreSQL uses Aspire's default session lifetime, so each test run gets a fresh container that is removed when the test application is disposed. Aspire handles container naming; the fixture doesn't need to edit resource annotations.
 
-Each run therefore starts with an empty PostgreSQL database. Aspire creates `todos`, and the backend's normal EF migrations create the application table. We reuse the real application definition while keeping the test data disposable.
+Each run starts with an empty PostgreSQL database. Aspire creates `todos`, and the backend's normal EF migrations create the application table. We reuse the real application definition while keeping the test data disposable. This configuration-based approach also follows [Aspire's guidance for disabling volumes in tests](https://aspire.dev/testing/manage-app-host/).
 
 ### Resetting data between scenarios
 
@@ -237,15 +239,9 @@ Resetting before the next scenario also handles tasks left behind by a failed te
 
 ### Avoiding fixed-port conflicts
 
-Development uses stable frontend and backend ports. Tests should work even when those ports are already in use by the development app. The fixture clears the host port on each endpoint before startup:
+Development uses stable frontend and backend ports. The Aspire testing builder randomizes resource ports by default, allowing a test instance to run alongside the development app. We rely on that built-in behavior rather than assigning ports in the fixture. See the [Aspire testing configuration options](https://aspire.dev/testing/overview/#configuration-options).
 
-```csharp
-foreach (var resource in builder.Resources)
-foreach (var endpoint in resource.Annotations.OfType<EndpointAnnotation>())
-    endpoint.Port = null;
-```
-
-Aspire allocates the test ports, and `GetEndpoint` returns the resulting URL. The frontend continues to discover the backend through Aspire's resource references.
+`GetEndpoint("web", "http")` returns the actual frontend URL. The frontend continues to discover the backend through Aspire's resource references, so the browser tests don't depend on the development ports.
 
 ### Keeping the testing builder alive
 
