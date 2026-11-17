@@ -1,0 +1,12 @@
+{
+  "name": "todo-web",
+  "private": true,
+  "scripts": {
+    "build": "tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css --minify",
+    "watch": "tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.5",
+    "tailwindcss": "4.3.5"
+  }
+}

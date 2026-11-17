@@ -1,0 +1,171 @@
+@page "/"
+@inject TodoApiClient Api
+<PageTitle>Daymark · A little more done</PageTitle>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <a href="/" class="brand"><span class="brand-mark">✓</span> daymark<span class="brand-dot">.</span></a>
+        <div class="workspace-label">YOUR WORKSPACE</div>
+        <nav aria-label="Task filters" class="space-y-2">
+            @foreach (var filter in Enum.GetValues<TaskFilter>())
+            {
+                <button class="nav-item @(selectedFilter == filter ? "selected" : "")" aria-pressed="@(selectedFilter == filter)"
+                        @onclick="() => selectedFilter = filter">
+                    <span class="nav-symbol" aria-hidden="true">@(filter == TaskFilter.All ? "▦" : filter == TaskFilter.Active ? "◷" : "✓")</span>
+                    <span>@FilterLabel(filter)</span><span class="nav-count">@Count(filter)</span>
+                </button>
+            }
+        </nav>
+        <div class="sidebar-note"><span class="note-star" aria-hidden="true">✳</span><p>Small steps.<br />Good things ahead.</p><span>Make room for what matters.</span></div>
+        <div class="profile"><span class="avatar">Y</span><div><strong>Your personal space</strong><span>One task at a time</span></div></div>
+    </aside>
+
+    <div class="main-column">
+        <header class="topbar"><span>My workspace <span class="mx-3 text-stone-300">/</span><strong>Tasks</strong></span><span class="topbar-tag"><span></span> A fresh start, every day</span></header>
+        <main class="main-content">
+            <div class="eyebrow"><span></span> LESS NOISE. MORE FOCUS.</div>
+            <div class="page-heading"><div><h1>A little more done<span>.</span></h1><p>A clear head starts with a clear list. What’s on yours?</p></div><span class="heading-doodle" aria-hidden="true">✳</span></div>
+            <div class="content-grid">
+                <section class="task-panel" aria-label="Your tasks" aria-busy="@(todos is null || busy)">
+                    <div class="panel-header"><div><h2>@FilterLabel(selectedFilter)</h2><span>@(todos is null ? "Getting things ready…" : $"{VisibleTodos.Count()} tasks in your list")</span></div><span class="panel-icon" aria-hidden="true">☰</span></div>
+                    <form class="add-form" @onsubmit="Add" @onsubmit:preventDefault novalidate>
+                        <span class="add-plus" aria-hidden="true">+</span>
+                        <label for="new-task" class="sr-only">New task</label>
+                        <input id="new-task" placeholder="What would you like to get done?" @bind="newTitle" @bind:event="oninput" disabled="@(busy || todos is null)" aria-describedby="task-error" />
+                        <button type="submit" class="add-button" disabled="@(busy || todos is null)">Add task <span aria-hidden="true">↗</span></button>
+                    </form>
+                    @if (error is not null)
+                    {
+                        <div id="task-error" role="alert" class="error-message">@error
+                            @if (todos is null) { <button class="underline ml-2" @onclick="Load">Try again</button> }
+                        </div>
+                    }
+                    @if (todos is null)
+                    {
+                        <div class="empty-state" role="status"><span class="empty-icon">◌</span><h3>Getting your list ready</h3><p>Just a moment.</p></div>
+                    }
+                    else if (!VisibleTodos.Any())
+                    {
+                        <div class="empty-state"><span class="empty-icon" aria-hidden="true">✓</span><h3>@(selectedFilter == TaskFilter.All ? "A little space for a fresh start" : "You’re all clear here")</h3><p>@(selectedFilter == TaskFilter.All ? "Add your first task. Big plans start small." : "Tasks matching this filter will appear here.")</p></div>
+                    }
+                    else
+                    {
+                        <ul class="task-list" aria-label="Task list">
+                            @foreach (var todo in VisibleTodos)
+                            {
+                                <li @key="todo.Id" data-testid="todo-row" class="task-row @(todo.IsCompleted ? "completed" : "")">
+                                    <input type="checkbox" class="task-checkbox" checked="@todo.IsCompleted" disabled="@busy" aria-label="Complete @todo.Title" @onchange="() => Toggle(todo)" />
+                                    @if (editingId == todo.Id)
+                                    {
+                                        <form class="edit-form" @onsubmit="() => Save(todo)" @onsubmit:preventDefault novalidate>
+                                            <input aria-label="Edit task title" class="edit-input" @bind="editTitle" @bind:event="oninput" disabled="@busy" />
+                                            <button type="submit" class="small-button" disabled="@busy">Save</button>
+                                            <button type="button" class="text-button" @onclick="() => editingId = null" disabled="@busy">Cancel</button>
+                                        </form>
+                                    }
+                                    else
+                                    {
+                                        <span class="task-title">@todo.Title</span>
+                                        @if (todo.IsCompleted) { <span class="done-badge">Done</span> }
+                                        <div class="row-actions">
+                                            <button class="icon-button" aria-label="Edit @todo.Title" title="Edit task" disabled="@busy" @onclick="() => Edit(todo)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1 12-12a2.8 2.8 0 0 0-4-4L4 15z" /></svg></button>
+                                            <button class="icon-button delete-button" aria-label="Delete @todo.Title" title="Delete task" disabled="@busy" @onclick="() => Delete(todo)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5" /></svg></button>
+                                        </div>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                    <div class="panel-footer"><span><span class="footer-dot"></span> @Count(TaskFilter.Active) left to do</span><span>A little progress goes a long way.</span></div>
+                </section>
+                <aside class="overview" aria-label="Progress overview">
+                    <div class="progress-card"><div class="card-eyebrow">THE BIG PICTURE <span aria-hidden="true">↗</span></div><h2>You’re making<br />room for more.</h2><div class="progress-value">@Progress<span>%</span><span class="progress-caption">complete</span></div><div class="progress-track" role="progressbar" aria-label="Tasks completed" aria-valuenow="@Progress" aria-valuemin="0" aria-valuemax="100"><span style="width: @(Progress)%"></span></div><div class="progress-detail">@Count(TaskFilter.Completed) of @Count(TaskFilter.All) tasks done</div></div>
+                    <div class="focus-card"><span class="focus-symbol" aria-hidden="true">✧</span><span class="card-eyebrow">A GENTLE REMINDER</span><p>You don’t have to do it all.<br />Just the next right thing.</p><div class="focus-rule"></div><span>Progress over perfection.</span></div>
+                </aside>
+            </div>
+            <footer class="page-footer"><span>DESIGNED FOR A CLEARER DAY</span><span>Less planning. More living. <span class="text-orange-600">✳</span></span></footer>
+        </main>
+    </div>
+</div>
+
+@code {
+    private List<TodoResponse>? todos;
+    private string newTitle = "";
+    private string editTitle = "";
+    private string? error;
+    private bool busy;
+    private Guid? editingId;
+    private TaskFilter selectedFilter;
+    private enum TaskFilter { All, Active, Completed }
+    private IEnumerable<TodoResponse> VisibleTodos => (todos ?? []).Where(todo => selectedFilter switch
+    {
+        TaskFilter.Active => !todo.IsCompleted,
+        TaskFilter.Completed => todo.IsCompleted,
+        _ => true
+    });
+    private int Count(TaskFilter filter) => (todos ?? []).Count(todo => filter switch
+    {
+        TaskFilter.Active => !todo.IsCompleted,
+        TaskFilter.Completed => todo.IsCompleted,
+        _ => true
+    });
+    private int Progress => todos is { Count: > 0 } ? (int)Math.Round(100.0 * Count(TaskFilter.Completed) / todos.Count) : 0;
+    private static string FilterLabel(TaskFilter filter) => filter == TaskFilter.All ? "All tasks" : filter.ToString();
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try { todos = await Api.GetAll(); }
+        catch (HttpRequestException) { error = "We couldn’t load your tasks. Please try again."; }
+        catch (TaskCanceledException) { error = "Loading took too long. Please try again."; }
+    }
+
+    private async Task Run(Func<Task> action)
+    {
+        if (busy) return;
+        busy = true;
+        error = null;
+        try { await action(); }
+        catch (HttpRequestException) { error = "We couldn’t save that change. Please try again."; }
+        catch (TaskCanceledException) { error = "The request took too long. Please try again."; }
+        finally { busy = false; }
+    }
+
+    private async Task Add()
+    {
+        if (!TodoRules.IsValidTitle(newTitle)) { error = TodoRules.TitleError; return; }
+        await Run(async () =>
+        {
+            var todo = await Api.Create(newTitle);
+            todos!.Insert(0, todo);
+            newTitle = "";
+            selectedFilter = TaskFilter.All;
+        });
+    }
+
+    private void Edit(TodoResponse todo) { editingId = todo.Id; editTitle = todo.Title; error = null; }
+
+    private async Task Save(TodoResponse todo)
+    {
+        if (!TodoRules.IsValidTitle(editTitle)) { error = TodoRules.TitleError; return; }
+        await Run(async () =>
+        {
+            var updated = await Api.Update(todo with { Title = editTitle });
+            todos![todos.FindIndex(x => x.Id == todo.Id)] = updated;
+            editingId = null;
+        });
+    }
+
+    private Task Toggle(TodoResponse todo) => Run(async () =>
+    {
+        var updated = await Api.Update(todo with { IsCompleted = !todo.IsCompleted });
+        todos![todos.FindIndex(x => x.Id == todo.Id)] = updated;
+    });
+
+    private Task Delete(TodoResponse todo) => Run(async () =>
+    {
+        await Api.Delete(todo.Id);
+        todos!.RemoveAll(x => x.Id == todo.Id);
+    });
+}

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../../common/Todo.Contracts/Todo.Contracts.csproj" />
+    <ProjectReference Include="../../aspire/Todo.ServiceDefaults/Todo.ServiceDefaults.csproj" />
+  </ItemGroup>
+</Project>
